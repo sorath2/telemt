@@ -148,10 +148,6 @@ impl MePool {
         out
     }
 
-    pub(super) fn required_writers_for_dc(endpoint_count: usize) -> usize {
-        endpoint_count.max(3)
-    }
-
     fn hardswap_warmup_connect_delay_ms(&self) -> u64 {
         let min_ms = self.me_hardswap_warmup_delay_min_ms.load(Ordering::Relaxed);
         let max_ms = self.me_hardswap_warmup_delay_max_ms.load(Ordering::Relaxed);
@@ -221,7 +217,7 @@ impl MePool {
 
             let mut endpoint_list: Vec<SocketAddr> = endpoints.iter().copied().collect();
             endpoint_list.sort_unstable();
-            let required = Self::required_writers_for_dc(endpoint_list.len());
+            let required = self.required_writers_for_dc(endpoint_list.len());
             let mut completed = false;
             let mut last_fresh_count = self
                 .fresh_writer_count_for_endpoints(generation, endpoints)
@@ -409,7 +405,7 @@ impl MePool {
                 if endpoints.is_empty() {
                     continue;
                 }
-                let required = Self::required_writers_for_dc(endpoints.len());
+                let required = self.required_writers_for_dc(endpoints.len());
                 let fresh_count = writers
                     .iter()
                     .filter(|w| !w.draining.load(Ordering::Relaxed))

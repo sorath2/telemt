@@ -479,6 +479,114 @@ async fn render_metrics(stats: &Stats, config: &ProxyConfig, ip_tracker: &UserIp
         }
     );
 
+    let _ = writeln!(
+        out,
+        "# HELP telemt_me_single_endpoint_outage_enter_total Single-endpoint DC outage transitions to active state"
+    );
+    let _ = writeln!(
+        out,
+        "# TYPE telemt_me_single_endpoint_outage_enter_total counter"
+    );
+    let _ = writeln!(
+        out,
+        "telemt_me_single_endpoint_outage_enter_total {}",
+        if me_allows_normal {
+            stats.get_me_single_endpoint_outage_enter_total()
+        } else {
+            0
+        }
+    );
+
+    let _ = writeln!(
+        out,
+        "# HELP telemt_me_single_endpoint_outage_exit_total Single-endpoint DC outage recovery transitions"
+    );
+    let _ = writeln!(
+        out,
+        "# TYPE telemt_me_single_endpoint_outage_exit_total counter"
+    );
+    let _ = writeln!(
+        out,
+        "telemt_me_single_endpoint_outage_exit_total {}",
+        if me_allows_normal {
+            stats.get_me_single_endpoint_outage_exit_total()
+        } else {
+            0
+        }
+    );
+
+    let _ = writeln!(
+        out,
+        "# HELP telemt_me_single_endpoint_outage_reconnect_attempt_total Reconnect attempts performed during single-endpoint outages"
+    );
+    let _ = writeln!(
+        out,
+        "# TYPE telemt_me_single_endpoint_outage_reconnect_attempt_total counter"
+    );
+    let _ = writeln!(
+        out,
+        "telemt_me_single_endpoint_outage_reconnect_attempt_total {}",
+        if me_allows_normal {
+            stats.get_me_single_endpoint_outage_reconnect_attempt_total()
+        } else {
+            0
+        }
+    );
+
+    let _ = writeln!(
+        out,
+        "# HELP telemt_me_single_endpoint_outage_reconnect_success_total Successful reconnect attempts during single-endpoint outages"
+    );
+    let _ = writeln!(
+        out,
+        "# TYPE telemt_me_single_endpoint_outage_reconnect_success_total counter"
+    );
+    let _ = writeln!(
+        out,
+        "telemt_me_single_endpoint_outage_reconnect_success_total {}",
+        if me_allows_normal {
+            stats.get_me_single_endpoint_outage_reconnect_success_total()
+        } else {
+            0
+        }
+    );
+
+    let _ = writeln!(
+        out,
+        "# HELP telemt_me_single_endpoint_quarantine_bypass_total Outage reconnect attempts that bypassed quarantine"
+    );
+    let _ = writeln!(
+        out,
+        "# TYPE telemt_me_single_endpoint_quarantine_bypass_total counter"
+    );
+    let _ = writeln!(
+        out,
+        "telemt_me_single_endpoint_quarantine_bypass_total {}",
+        if me_allows_normal {
+            stats.get_me_single_endpoint_quarantine_bypass_total()
+        } else {
+            0
+        }
+    );
+
+    let _ = writeln!(
+        out,
+        "# HELP telemt_me_single_endpoint_shadow_rotate_total Successful periodic shadow rotations for single-endpoint DC groups"
+    );
+    let _ = writeln!(
+        out,
+        "# TYPE telemt_me_single_endpoint_shadow_rotate_total counter"
+    );
+    let _ = writeln!(
+        out,
+        "telemt_me_single_endpoint_shadow_rotate_total {}",
+        if me_allows_normal {
+            stats.get_me_single_endpoint_shadow_rotate_total()
+        } else {
+            0
+        }
+    );
+
     let _ = writeln!(out, "# HELP telemt_secure_padding_invalid_total Invalid secure frame lengths");
     let _ = writeln!(out, "# TYPE telemt_secure_padding_invalid_total counter");
     let _ = writeln!(

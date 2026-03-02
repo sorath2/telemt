@@ -101,6 +101,12 @@ pub struct MePool {
     pub(super) me_reconnect_backoff_base: Duration,
     pub(super) me_reconnect_backoff_cap: Duration,
     pub(super) me_reconnect_fast_retry_count: u32,
+    pub(super) me_single_endpoint_shadow_writers: AtomicU8,
+    pub(super) me_single_endpoint_outage_mode_enabled: AtomicBool,
+    pub(super) me_single_endpoint_outage_disable_quarantine: AtomicBool,
+    pub(super) me_single_endpoint_outage_backoff_min_ms: AtomicU64,
+    pub(super) me_single_endpoint_outage_backoff_max_ms: AtomicU64,
+    pub(super) me_single_endpoint_shadow_rotate_every_secs: AtomicU64,
     pub(super) proxy_map_v4: Arc<RwLock<HashMap<i32, Vec<(IpAddr, u16)>>>>,
     pub(super) proxy_map_v6: Arc<RwLock<HashMap<i32, Vec<(IpAddr, u16)>>>>,
     pub(super) default_dc: AtomicI32,
@@ -189,6 +195,12 @@ impl MePool {
         me_reconnect_backoff_base_ms: u64,
         me_reconnect_backoff_cap_ms: u64,
         me_reconnect_fast_retry_count: u32,
+        me_single_endpoint_shadow_writers: u8,
+        me_single_endpoint_outage_mode_enabled: bool,
+        me_single_endpoint_outage_disable_quarantine: bool,
+        me_single_endpoint_outage_backoff_min_ms: u64,
+        me_single_endpoint_outage_backoff_max_ms: u64,
+        me_single_endpoint_shadow_rotate_every_secs: u64,
         hardswap: bool,
         me_pool_drain_ttl_secs: u64,
         me_pool_force_close_secs: u64,
@@ -259,6 +271,22 @@ impl MePool {
             me_reconnect_backoff_base: Duration::from_millis(me_reconnect_backoff_base_ms),
             me_reconnect_backoff_cap: Duration::from_millis(me_reconnect_backoff_cap_ms),
             me_reconnect_fast_retry_count,
+            me_single_endpoint_shadow_writers: AtomicU8::new(me_single_endpoint_shadow_writers),
+            me_single_endpoint_outage_mode_enabled: AtomicBool::new(
+                me_single_endpoint_outage_mode_enabled,
+            ),
+            me_single_endpoint_outage_disable_quarantine: AtomicBool::new(
+                me_single_endpoint_outage_disable_quarantine,
+            ),
+            me_single_endpoint_outage_backoff_min_ms: AtomicU64::new(
+                me_single_endpoint_outage_backoff_min_ms,
+            ),
+            me_single_endpoint_outage_backoff_max_ms: AtomicU64::new(
+                me_single_endpoint_outage_backoff_max_ms,
+            ),
+            me_single_endpoint_shadow_rotate_every_secs: AtomicU64::new(
+                me_single_endpoint_shadow_rotate_every_secs,
+            ),
             pool_size: 2,
             proxy_map_v4: Arc::new(RwLock::new(proxy_map_v4)),
             proxy_map_v6: Arc::new(RwLock::new(proxy_map_v6)),
@@ -317,6 +345,12 @@ impl MePool {
         bind_stale_ttl_secs: u64,
         secret_atomic_snapshot: bool,
         deterministic_writer_sort: bool,
+        single_endpoint_shadow_writers: u8,
+        single_endpoint_outage_mode_enabled: bool,
+        single_endpoint_outage_disable_quarantine: bool,
+        single_endpoint_outage_backoff_min_ms: u64,
+        single_endpoint_outage_backoff_max_ms: u64,
+        single_endpoint_shadow_rotate_every_secs: u64,
     ) {
         self.hardswap.store(hardswap, Ordering::Relaxed);
         self.me_pool_drain_ttl_secs
@@ -341,6 +375,18 @@ impl MePool {
             .store(secret_atomic_snapshot, Ordering::Relaxed);
         self.me_deterministic_writer_sort
             .store(deterministic_writer_sort, Ordering::Relaxed);
+        self.me_single_endpoint_shadow_writers
+            .store(single_endpoint_shadow_writers, Ordering::Relaxed);
+        self.me_single_endpoint_outage_mode_enabled
+            .store(single_endpoint_outage_mode_enabled, Ordering::Relaxed);
+        self.me_single_endpoint_outage_disable_quarantine
+            .store(single_endpoint_outage_disable_quarantine, Ordering::Relaxed);
+        self.me_single_endpoint_outage_backoff_min_ms
+            .store(single_endpoint_outage_backoff_min_ms, Ordering::Relaxed);
+        self.me_single_endpoint_outage_backoff_max_ms
+            .store(single_endpoint_outage_backoff_max_ms, Ordering::Relaxed);
+        self.me_single_endpoint_shadow_rotate_every_secs
+            .store(single_endpoint_shadow_rotate_every_secs, Ordering::Relaxed);
     }
 
     pub fn reset_stun_state(&self) {
@@ -403,6 +449,54 @@ impl MePool {
 
     pub(super) fn bind_stale_mode(&self) -> MeBindStaleMode {
         MeBindStaleMode::from_u8(self.me_bind_stale_mode.load(Ordering::Relaxed))
+    }
+
+    pub(super) fn required_writers_for_dc(&self, endpoint_count: usize) -> usize {
+        if endpoint_count == 0 {
+            return 0;
+        }
+        if endpoint_count == 1 {
+            let shadow = self
+                .me_single_endpoint_shadow_writers
+                .load(Ordering::Relaxed) as usize;
+            return (1 + shadow).max(3);
+        }
+        endpoint_count.max(3)
+    }
+
+    pub(super) fn single_endpoint_outage_mode_enabled(&self) -> bool {
+        self.me_single_endpoint_outage_mode_enabled
+            .load(Ordering::Relaxed)
+    }
+
+    pub(super) fn single_endpoint_outage_disable_quarantine(&self) -> bool {
+        self.me_single_endpoint_outage_disable_quarantine
+            .load(Ordering::Relaxed)
+    }
+
+    pub(super) fn single_endpoint_outage_backoff_bounds_ms(&self) -> (u64, u64) {
+        let min_ms = self
+            .me_single_endpoint_outage_backoff_min_ms
+            .load(Ordering::Relaxed);
+        let max_ms = self
+            .me_single_endpoint_outage_backoff_max_ms
+            .load(Ordering::Relaxed);
+        if min_ms <= max_ms {
+            (min_ms, max_ms)
+        } else {
+            (max_ms, min_ms)
+        }
+    }
+
+    pub(super) fn single_endpoint_shadow_rotate_interval(&self) -> Option<Duration> {
+        let secs = self
+            .me_single_endpoint_shadow_rotate_every_secs
+            .load(Ordering::Relaxed);
+        if secs == 0 {
+            None
+        } else {
+            Some(Duration::from_secs(secs))
+        }
     }
 
     pub(super) fn family_order(&self) -> Vec<IpFamily> {
