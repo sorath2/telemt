@@ -261,6 +261,15 @@ impl ProxyConfig {
             ));
         }
 
+        if config.general.me_adaptive_floor_min_writers_single_endpoint == 0
+            || config.general.me_adaptive_floor_min_writers_single_endpoint > 32
+        {
+            return Err(ProxyError::Config(
+                "general.me_adaptive_floor_min_writers_single_endpoint must be within [1, 32]"
+                    .to_string(),
+            ));
+        }
+
         if config.general.me_single_endpoint_outage_backoff_min_ms == 0 {
             return Err(ProxyError::Config(
                 "general.me_single_endpoint_outage_backoff_min_ms must be > 0".to_string(),
@@ -642,6 +651,19 @@ mod tests {
             cfg.general.me_single_endpoint_shadow_rotate_every_secs,
             default_me_single_endpoint_shadow_rotate_every_secs()
         );
+        assert_eq!(cfg.general.me_floor_mode, MeFloorMode::default());
+        assert_eq!(
+            cfg.general.me_adaptive_floor_idle_secs,
+            default_me_adaptive_floor_idle_secs()
+        );
+        assert_eq!(
+            cfg.general.me_adaptive_floor_min_writers_single_endpoint,
+            default_me_adaptive_floor_min_writers_single_endpoint()
+        );
+        assert_eq!(
+            cfg.general.me_adaptive_floor_recover_grace_secs,
+            default_me_adaptive_floor_recover_grace_secs()
+        );
         assert_eq!(
             cfg.general.upstream_connect_retry_attempts,
             default_upstream_connect_retry_attempts()
@@ -703,6 +725,19 @@ mod tests {
         assert_eq!(
             general.me_single_endpoint_shadow_rotate_every_secs,
             default_me_single_endpoint_shadow_rotate_every_secs()
+        );
+        assert_eq!(general.me_floor_mode, MeFloorMode::default());
+        assert_eq!(
+            general.me_adaptive_floor_idle_secs,
+            default_me_adaptive_floor_idle_secs()
+        );
+        assert_eq!(
+            general.me_adaptive_floor_min_writers_single_endpoint,
+            default_me_adaptive_floor_min_writers_single_endpoint()
+        );
+        assert_eq!(
+            general.me_adaptive_floor_recover_grace_secs,
+            default_me_adaptive_floor_recover_grace_secs()
         );
         assert_eq!(
             general.upstream_connect_retry_attempts,
