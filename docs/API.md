@@ -13,12 +13,17 @@ API runtime is configured in `[server.api]`.
 | `listen` | `string` (`IP:PORT`) | `127.0.0.1:9091` | API bind address. |
 | `whitelist` | `CIDR[]` | `127.0.0.1/32, ::1/128` | Source IP allowlist. Empty list means allow all. |
 | `auth_header` | `string` | `""` | Exact value for `Authorization` header. Empty disables header auth. |
-| `request_body_limit_bytes` | `usize` | `65536` | Maximum request body size. |
+| `request_body_limit_bytes` | `usize` | `65536` | Maximum request body size. Must be `> 0`. |
 | `minimal_runtime_enabled` | `bool` | `false` | Enables runtime snapshot endpoints requiring ME pool read-lock aggregation. |
-| `minimal_runtime_cache_ttl_ms` | `u64` | `1000` | Cache TTL for minimal snapshots. `0` disables cache. |
+| `minimal_runtime_cache_ttl_ms` | `u64` | `1000` | Cache TTL for minimal snapshots. `0` disables cache; valid range is `[0, 60000]`. |
 | `read_only` | `bool` | `false` | Disables mutating endpoints. |
 
 `server.admin_api` is accepted as an alias for backward compatibility.
+
+Runtime validation for API config:
+- `server.api.listen` must be a valid `IP:PORT`.
+- `server.api.request_body_limit_bytes` must be `> 0`.
+- `server.api.minimal_runtime_cache_ttl_ms` must be within `[0, 60000]`.
 
 ## Protocol Contract
 
@@ -51,6 +56,21 @@ API runtime is configured in `[server.api]`.
 }
 ```
 
+## Request Processing Order
+
+Requests are processed in this order:
+1. `api_enabled` gate (`503 api_disabled` if disabled).
+2. Source IP whitelist gate (`403 forbidden`).
+3. `Authorization` header gate when configured (`401 unauthorized`).
+4. Route and method matching (`404 not_found` or `405 method_not_allowed`).
+5. `read_only` gate for mutating routes (`403 read_only`).
+6. Request body read/limit/JSON decode (`413 payload_too_large`, `400 bad_request`).
+7. Business validation and config write path.
+
+Notes:
+- Whitelist is evaluated against the direct TCP peer IP (`SocketAddr::ip`), without `X-Forwarded-For` support.
+- `Authorization` check is exact string equality against configured `auth_header`.
+
 ## Endpoint Matrix
 
 | Method | Path | Body | Success | `data` contract |
@@ -58,6 +78,7 @@ API runtime is configured in `[server.api]`.
 | `GET` | `/v1/health` | none | `200` | `HealthData` |
 | `GET` | `/v1/stats/summary` | none | `200` | `SummaryData` |
 | `GET` | `/v1/stats/zero/all` | none | `200` | `ZeroAllData` |
+| `GET` | `/v1/stats/upstreams` | none | `200` | `UpstreamsData` |
 | `GET` | `/v1/stats/minimal/all` | none | `200` | `MinimalAllData` |
 | `GET` | `/v1/stats/me-writers` | none | `200` | `MeWritersData` |
 | `GET` | `/v1/stats/dcs` | none | `200` | `DcStatusData` |
@@ -67,7 +88,7 @@ API runtime is configured in `[server.api]`.
 | `GET` | `/v1/users/{username}` | none | `200` | `UserInfo` |
 | `PATCH` | `/v1/users/{username}` | `PatchUserRequest` | `200` | `UserInfo` |
 | `DELETE` | `/v1/users/{username}` | none | `200` | `string` (deleted username) |
-| `POST` | `/v1/users/{username}/rotate-secret` | `RotateSecretRequest` or empty body | `200` | `CreateUserResponse` |
+| `POST` | `/v1/users/{username}/rotate-secret` | `RotateSecretRequest` or empty body | `404` | `ErrorResponse` (`not_found`, current runtime behavior) |
 
 ## Common Error Codes
 
@@ -77,14 +98,36 @@ API runtime is configured in `[server.api]`.
 | `401` | `unauthorized` | Missing/invalid `Authorization` when `auth_header` is configured. |
 | `403` | `forbidden` | Source IP is not allowed by whitelist. |
 | `403` | `read_only` | Mutating endpoint called while `read_only=true`. |
-| `404` | `not_found` | Unknown route or unknown user. |
-| `405` | `method_not_allowed` | Unsupported method for an existing user route. |
+| `404` | `not_found` | Unknown route, unknown user, or unsupported sub-route (including current `rotate-secret` route). |
+| `405` | `method_not_allowed` | Unsupported method for `/v1/users/{username}` route shape. |
 | `409` | `revision_conflict` | `If-Match` revision mismatch. |
 | `409` | `user_exists` | User already exists on create. |
 | `409` | `last_user_forbidden` | Attempt to delete last configured user. |
 | `413` | `payload_too_large` | Body exceeds `request_body_limit_bytes`. |
 | `500` | `internal_error` | Internal error (I/O, serialization, config load/save). |
 | `503` | `api_disabled` | API disabled in config. |
+
+## Routing and Method Edge Cases
+
+| Case | Behavior |
+| --- | --- |
+| Path matching | Exact match on `req.uri().path()`. Query string does not affect route matching. |
+| Trailing slash | Not normalized. Example: `/v1/users/` is `404`. |
+| Username route with extra slash | `/v1/users/{username}/...` is not treated as user route and returns `404`. |
+| `PUT /v1/users/{username}` | `405 method_not_allowed`. |
+| `POST /v1/users/{username}` | `404 not_found`. |
+| `POST /v1/users/{username}/rotate-secret` | `404 not_found` in current release due route matcher limitation. |
+
+## Body and JSON Semantics
+
+- Request body is read only for mutating routes that define a body contract.
+- Body size limit is enforced during streaming read (`413 payload_too_large`).
+- Invalid transport body frame returns `400 bad_request` (`Invalid request body`).
+- Invalid JSON returns `400 bad_request` (`Invalid JSON body`).
+- `Content-Type` is not required for JSON parsing.
+- Unknown JSON fields are ignored by deserialization.
+- `PATCH` updates only provided fields and does not support explicit clearing of optional fields.
+- `If-Match` supports both quoted and unquoted values; surrounding whitespace is trimmed.
 
 ## Request Contracts
 
@@ -113,6 +156,8 @@ API runtime is configured in `[server.api]`.
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `secret` | `string` | no | Exactly 32 hex chars. If missing, generated automatically. |
+
+Note: the request contract is defined, but the corresponding route currently returns `404` (see routing edge cases).
 
 ## Response Data Contracts
 
@@ -172,6 +217,47 @@ API runtime is configured in `[server.api]`.
 | `connect_duration_fail_bucket_101_500ms` | `u64` | Failed connects 101-500 ms. |
 | `connect_duration_fail_bucket_501_1000ms` | `u64` | Failed connects 501-1000 ms. |
 | `connect_duration_fail_bucket_gt_1000ms` | `u64` | Failed connects >1000 ms. |
+
+### `UpstreamsData`
+| Field | Type | Description |
+| --- | --- | --- |
+| `enabled` | `bool` | Runtime upstream snapshot availability according to API config. |
+| `reason` | `string?` | `feature_disabled` or `source_unavailable` when runtime snapshot is unavailable. |
+| `generated_at_epoch_secs` | `u64` | Snapshot generation time. |
+| `zero` | `ZeroUpstreamData` | Always available zero-cost upstream counters block. |
+| `summary` | `UpstreamSummaryData?` | Runtime upstream aggregate view, null when unavailable. |
+| `upstreams` | `UpstreamStatus[]?` | Per-upstream runtime status rows, null when unavailable. |
+
+#### `UpstreamSummaryData`
+| Field | Type | Description |
+| --- | --- | --- |
+| `configured_total` | `usize` | Total configured upstream entries. |
+| `healthy_total` | `usize` | Upstreams currently marked healthy. |
+| `unhealthy_total` | `usize` | Upstreams currently marked unhealthy. |
+| `direct_total` | `usize` | Number of direct upstream entries. |
+| `socks4_total` | `usize` | Number of SOCKS4 upstream entries. |
+| `socks5_total` | `usize` | Number of SOCKS5 upstream entries. |
+
+#### `UpstreamStatus`
+| Field | Type | Description |
+| --- | --- | --- |
+| `upstream_id` | `usize` | Runtime upstream index. |
+| `route_kind` | `string` | Upstream route kind: `direct`, `socks4`, `socks5`. |
+| `address` | `string` | Upstream address (`direct` for direct route kind). Authentication fields are intentionally omitted. |
+| `weight` | `u16` | Selection weight. |
+| `scopes` | `string` | Configured scope selector string. |
+| `healthy` | `bool` | Current health flag. |
+| `fails` | `u32` | Consecutive fail counter. |
+| `last_check_age_secs` | `u64` | Seconds since the last health-check update. |
+| `effective_latency_ms` | `f64?` | Effective upstream latency used by selector. |
+| `dc` | `UpstreamDcStatus[]` | Per-DC latency/IP preference snapshot. |
+
+#### `UpstreamDcStatus`
+| Field | Type | Description |
+| --- | --- | --- |
+| `dc` | `i16` | Telegram DC id. |
+| `latency_ema_ms` | `f64?` | Per-DC latency EMA value. |
+| `ip_preference` | `string` | Per-DC IP family preference: `unknown`, `prefer_v4`, `prefer_v6`, `both_work`, `unavailable`. |
 
 #### `ZeroMiddleProxyData`
 | Field | Type | Description |
@@ -392,8 +478,11 @@ API runtime is configured in `[server.api]`.
 
 Link generation uses active config and enabled modes:
 - `[general.links].public_host/public_port` have priority.
+- If `public_host` is not set, startup-detected public IPs are used (`IPv4`, `IPv6`, or both when available).
 - Fallback host sources: listener `announce`, `announce_ip`, explicit listener `ip`.
 - Legacy fallback: `listen_addr_ipv4` and `listen_addr_ipv6` when routable.
+- Startup-detected IPs are fixed for process lifetime and refreshed on restart.
+- User rows are sorted by `username` in ascending lexical order.
 
 ### `CreateUserResponse`
 | Field | Type | Description |
@@ -407,21 +496,53 @@ Link generation uses active config and enabled modes:
 | --- | --- |
 | `POST /v1/users` | Creates user and validates resulting config before atomic save. |
 | `PATCH /v1/users/{username}` | Partial update of provided fields only. Missing fields remain unchanged. |
-| `POST /v1/users/{username}/rotate-secret` | Replaces secret. Empty body is allowed and auto-generates secret. |
+| `POST /v1/users/{username}/rotate-secret` | Currently returns `404` in runtime route matcher; request schema is reserved for intended behavior. |
 | `DELETE /v1/users/{username}` | Deletes user and related optional settings. Last user deletion is blocked. |
 
 All mutating endpoints:
 - Respect `read_only` mode.
 - Accept optional `If-Match` for optimistic concurrency.
 - Return new `revision` after successful write.
+- Use process-local mutation lock + atomic write (`tmp + rename`) for config persistence.
+
+## Runtime State Matrix
+
+| Endpoint | `minimal_runtime_enabled=false` | `minimal_runtime_enabled=true` + source unavailable | `minimal_runtime_enabled=true` + source available |
+| --- | --- | --- | --- |
+| `/v1/stats/minimal/all` | `enabled=false`, `reason=feature_disabled`, `data=null` | `enabled=true`, `reason=source_unavailable`, fallback `data` with disabled ME blocks | `enabled=true`, `reason` omitted, full payload |
+| `/v1/stats/me-writers` | `middle_proxy_enabled=false`, `reason=feature_disabled` | `middle_proxy_enabled=false`, `reason=source_unavailable` | `middle_proxy_enabled=true`, runtime snapshot |
+| `/v1/stats/dcs` | `middle_proxy_enabled=false`, `reason=feature_disabled` | `middle_proxy_enabled=false`, `reason=source_unavailable` | `middle_proxy_enabled=true`, runtime snapshot |
+| `/v1/stats/upstreams` | `enabled=false`, `reason=feature_disabled`, `summary/upstreams` omitted, `zero` still present | `enabled=true`, `reason=source_unavailable`, `summary/upstreams` omitted, `zero` present | `enabled=true`, `reason` omitted, `summary/upstreams` present, `zero` present |
+
+`source_unavailable` conditions:
+- ME endpoints: ME pool is absent (for example direct-only mode or failed ME initialization).
+- Upstreams endpoint: non-blocking upstream snapshot lock is unavailable at request time.
+
+## Serialization Rules
+
+- Success responses always include `revision`.
+- Error responses never include `revision`; they include `request_id`.
+- Optional fields with `skip_serializing_if` are omitted when absent.
+- Nullable payload fields may still be `null` where contract uses `?` (for example `UserInfo` option fields).
+- For `/v1/stats/upstreams`, authentication details of SOCKS upstreams are intentionally omitted.
 
 ## Operational Notes
 
 | Topic | Details |
 | --- | --- |
-| API startup | API binds only when `[server.api].enabled=true`. |
-| Restart requirements | Changes in `server.api` settings require process restart. |
+| API startup | API listener is spawned only when `[server.api].enabled=true`. |
+| `listen` port `0` | API spawn is skipped when parsed listen port is `0` (treated as disabled bind target). |
+| Bind failure | Failed API bind logs warning and API task exits (no auto-retry loop). |
+| ME runtime status endpoints | `/v1/stats/me-writers`, `/v1/stats/dcs`, `/v1/stats/minimal/all` require `[server.api].minimal_runtime_enabled=true`; otherwise they return disabled payload with `reason=feature_disabled`. |
+| Upstream runtime endpoint | `/v1/stats/upstreams` always returns `zero`, but runtime fields (`summary`, `upstreams`) require `[server.api].minimal_runtime_enabled=true`. |
+| Restart requirements | `server.api` changes are restart-required for predictable behavior. |
+| Hot-reload nuance | A pure `server.api`-only config change may not propagate through watcher broadcast; a mixed change (with hot fields) may propagate API flags while still warning that restart is required. |
 | Runtime apply path | Successful writes are picked up by existing config watcher/hot-reload path. |
 | Exposure | Built-in TLS/mTLS is not provided. Use loopback bind + reverse proxy if needed. |
 | Pagination | User list currently has no pagination/filtering. |
 | Serialization side effect | Config comments/manual formatting are not preserved on write. |
+
+## Known Limitations (Current Release)
+
+- `POST /v1/users/{username}/rotate-secret` is currently unreachable in route matcher and returns `404`.
+- API runtime controls under `server.api` are documented as restart-required; hot-reload behavior for these fields is not strictly uniform in all change combinations.
