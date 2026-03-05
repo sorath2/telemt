@@ -629,6 +629,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     let me2dc_fallback = config.general.me2dc_fallback;
     let me_init_retry_attempts = config.general.me_init_retry_attempts;
+    let me_init_warn_after_attempts: u32 = 3;
     if use_middle_proxy && !decision.ipv4_me && !decision.ipv6_me {
         if me2dc_fallback {
             warn!("No usable IP family for Middle Proxy detected; falling back to direct DC");
@@ -832,14 +833,25 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
                                 } else {
                                     me_init_retry_attempts.to_string()
                                 };
-                                warn!(
-                                    error = %e,
-                                    attempt = init_attempt,
-                                    retry_limit = retry_limit,
-                                    me2dc_fallback = me2dc_fallback,
-                                    retry_in_secs = 2,
-                                    "ME pool is not ready yet; retrying startup initialization"
-                                );
+                                if init_attempt >= me_init_warn_after_attempts {
+                                    warn!(
+                                        error = %e,
+                                        attempt = init_attempt,
+                                        retry_limit = retry_limit,
+                                        me2dc_fallback = me2dc_fallback,
+                                        retry_in_secs = 2,
+                                        "ME pool is not ready yet; retrying startup initialization"
+                                    );
+                                } else {
+                                    info!(
+                                        error = %e,
+                                        attempt = init_attempt,
+                                        retry_limit = retry_limit,
+                                        me2dc_fallback = me2dc_fallback,
+                                        retry_in_secs = 2,
+                                        "ME pool startup warmup: retrying initialization"
+                                    );
+                                }
                                 pool.reset_stun_state();
                                 tokio::time::sleep(Duration::from_secs(2)).await;
                             }
