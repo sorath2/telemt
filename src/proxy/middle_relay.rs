@@ -382,7 +382,7 @@ where
 
                     let mut batch_frames = 0usize;
                     let mut batch_bytes = 0usize;
-                    let mut flush_immediately = false;
+                    let mut flush_immediately;
 
                     match process_me_writer_response(
                         first,

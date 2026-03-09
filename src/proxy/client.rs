@@ -806,12 +806,8 @@ impl RunningClientHandler {
             });
         }
 
-        let mut ip_reserved = false;
-        // IP limit check
-        match ip_tracker.check_and_add(user, peer_addr.ip()).await {
-            Ok(()) => {
-                ip_reserved = true;
-            }
+        let ip_reserved = match ip_tracker.check_and_add(user, peer_addr.ip()).await {
+            Ok(()) => true,
             Err(reason) => {
                 warn!(
                     user = %user,
@@ -823,7 +819,8 @@ impl RunningClientHandler {
                     user: user.to_string(),
                 });
             }
-        }
+        };
+        // IP limit check
 
         if let Some(limit) = config.access.user_max_tcp_conns.get(user)
             && stats.get_user_curr_connects(user) >= *limit as u64
