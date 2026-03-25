@@ -257,11 +257,17 @@ pub struct SecretSnapshot {
     pub secret: Vec<u8>,
 }
 
-#[allow(dead_code)]
-pub struct MePool {
+pub struct RoutingCore {
     pub(super) registry: Arc<ConnRegistry>,
     pub(super) writers: Arc<WritersState>,
     pub(super) rr: AtomicU64,
+    pub(super) writer_epoch: watch::Sender<u64>,
+    pub(super) preferred_endpoints_by_dc: ArcSwap<HashMap<i32, Vec<SocketAddr>>>,
+}
+
+#[allow(dead_code)]
+pub struct MePool {
+    pub(super) routing: Arc<RoutingCore>,
     pub(super) decision: NetworkDecision,
     pub(super) upstream: Option<Arc<UpstreamManager>>,
     pub(super) rng: Arc<SecureRandom>,
@@ -332,7 +338,6 @@ pub struct MePool {
     pub(super) nat_reflection_cache: Arc<Mutex<NatReflectionCache>>,
     pub(super) nat_reflection_singleflight_v4: Arc<Mutex<()>>,
     pub(super) nat_reflection_singleflight_v6: Arc<Mutex<()>>,
-    pub(super) writer_epoch: watch::Sender<u64>,
     pub(super) refill_inflight: Arc<Mutex<HashSet<RefillEndpointKey>>>,
     pub(super) refill_inflight_dc: Arc<Mutex<HashSet<RefillDcKey>>>,
     pub(super) conn_count: AtomicUsize,
@@ -389,7 +394,14 @@ pub struct MePool {
     pub(super) me_last_drain_gate_updated_at_epoch_secs: AtomicU64,
     pub(super) runtime_ready: AtomicBool,
     pool_size: usize,
-    pub(super) preferred_endpoints_by_dc: ArcSwap<HashMap<i32, Vec<SocketAddr>>>,
+}
+
+impl Deref for MePool {
+    type Target = RoutingCore;
+
+    fn deref(&self) -> &Self::Target {
+        self.routing.as_ref()
+    }
 }
 
 #[derive(Debug, Default)]
@@ -524,9 +536,13 @@ impl MePool {
         let (writer_epoch, _) = watch::channel(0u64);
         let now_epoch_secs = Self::now_epoch_secs();
         Arc::new(Self {
-            registry,
-            writers: Arc::new(WritersState::new()),
-            rr: AtomicU64::new(0),
+            routing: Arc::new(RoutingCore {
+                registry,
+                writers: Arc::new(WritersState::new()),
+                rr: AtomicU64::new(0),
+                writer_epoch,
+                preferred_endpoints_by_dc: ArcSwap::from_pointee(preferred_endpoints_by_dc),
+            }),
             decision,
             upstream,
             rng,
@@ -644,7 +660,6 @@ impl MePool {
             nat_reflection_cache: Arc::new(Mutex::new(NatReflectionCache::default())),
             nat_reflection_singleflight_v4: Arc::new(Mutex::new(())),
             nat_reflection_singleflight_v6: Arc::new(Mutex::new(())),
-            writer_epoch,
             refill_inflight: Arc::new(Mutex::new(HashSet::new())),
             refill_inflight_dc: Arc::new(Mutex::new(HashSet::new())),
             conn_count: AtomicUsize::new(0),
@@ -731,7 +746,6 @@ impl MePool {
             me_last_drain_gate_block_reason: AtomicU8::new(MeDrainGateReason::Open as u8),
             me_last_drain_gate_updated_at_epoch_secs: AtomicU64::new(now_epoch_secs),
             runtime_ready: AtomicBool::new(false),
-            preferred_endpoints_by_dc: ArcSwap::from_pointee(preferred_endpoints_by_dc),
         })
     }
 

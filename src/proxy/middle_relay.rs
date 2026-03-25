@@ -60,6 +60,9 @@ static DESYNC_DEDUP_PREVIOUS: OnceLock<DashMap<u64, Instant>> = OnceLock::new();
 static DESYNC_HASHER: OnceLock<RandomState> = OnceLock::new();
 static DESYNC_FULL_CACHE_LAST_EMIT_AT: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
 static DESYNC_DEDUP_ROTATION_STATE: OnceLock<Mutex<DesyncDedupRotationState>> = OnceLock::new();
+// Invariant for async callers:
+// this std::sync::Mutex is allowed only because critical sections are short,
+// synchronous, and MUST never cross an `.await`.
 static RELAY_IDLE_CANDIDATE_REGISTRY: OnceLock<Mutex<RelayIdleCandidateRegistry>> = OnceLock::new();
 static RELAY_IDLE_MARK_SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -100,6 +103,7 @@ fn relay_idle_candidate_registry() -> &'static Mutex<RelayIdleCandidateRegistry>
 
 fn relay_idle_candidate_registry_lock() -> std::sync::MutexGuard<'static, RelayIdleCandidateRegistry>
 {
+    // Keep lock scope narrow and synchronous: callers must drop guard before any `.await`.
     let registry = relay_idle_candidate_registry();
     match registry.lock() {
         Ok(guard) => guard,

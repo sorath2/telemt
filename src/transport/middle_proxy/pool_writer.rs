@@ -596,7 +596,8 @@ impl MePool {
         let _ = self.registry.writer_lost(writer_id).await;
         self.rtt_stats.lock().await.remove(&writer_id);
         if let Some(tx) = close_tx {
-            let _ = tx.send(WriterCommand::Close).await;
+            // Keep teardown critical path non-blocking: close is best-effort only.
+            let _ = tx.try_send(WriterCommand::Close);
         }
         if let Some(addr) = removed_addr {
             if let Some(uptime) = removed_uptime {
