@@ -202,15 +202,6 @@ impl FamilyHealthSnapshot {
 }
 
 impl MeFamilyRuntimeState {
-    pub(crate) fn from_u8(value: u8) -> Self {
-        match value {
-            1 => Self::Degraded,
-            2 => Self::Suppressed,
-            3 => Self::Recovering,
-            _ => Self::Healthy,
-        }
-    }
-
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Healthy => "healthy",
@@ -852,12 +843,11 @@ impl MePool {
     }
 
     pub(super) fn notify_writer_epoch(&self) {
-        let _ = self.writer_epoch.send_modify(|epoch| {
+        self.writer_epoch.send_modify(|epoch| {
             *epoch = epoch.wrapping_add(1);
         });
     }
 
-    #[allow(dead_code)]
     pub(super) fn set_family_runtime_state(
         &self,
         family: IpFamily,
