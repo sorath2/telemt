@@ -1,61 +1,45 @@
-### Telemt Based Config.toml
-# We believe that these settings are sufficient for most scenarios 
-# where cutting-egde methods and parameters or special solutions are not needed
+show_link = ["user1", "user2", "user3", "user4", "user5", "user6", "user7", "user8", "user9", "user10", "user11", "user12"]
 
-# === General Settings ===
 [general]
-use_middle_proxy = true
-# Global ad_tag fallback when user has no per-user tag in [access.user_ad_tags]
-# ad_tag = "00000000000000000000000000000000"
-# Per-user ad_tag in [access.user_ad_tags] (32 hex from @MTProxybot)
-
-# === Log Level ===
-# Log level: debug | verbose | normal | silent
-# Can be overridden with --silent or --log-level CLI flags
-# RUST_LOG env var takes absolute priority over all of these
+prefer_ipv6 = false
+fast_mode = true
+use_middle_proxy = false
 log_level = "normal"
 
 [general.modes]
-classic = false
+classic = false 
 secure = false
-tls = true
+tls = true 
 
-[general.links]
-show = "*"
-# show = ["alice", "bob"] # Only show links for alice and bob
-# show = "*"              # Show links for all users
-# public_host = "proxy.example.com"  # Host (IP or domain) for tg:// links
-# public_port = 443                  # Port for tg:// links (default: server.port)
-
-# === Server Binding ===
 [server]
 port = 443
-# proxy_protocol = false           # Enable if behind HAProxy/nginx with PROXY protocol
-# metrics_port = 9090
-# metrics_listen = "127.0.0.1:9090" # Listen address for metrics (overrides metrics_port)
-# metrics_whitelist = ["127.0.0.1/32", "::1/128"]
+listen_addr_ipv4 = "0.0.0.0"
+listen_addr_ipv6 = "::"
 
-[server.api]
-enabled = true
-listen = "127.0.0.1:9091"
-whitelist = ["127.0.0.1/32", "::1/128"]
-minimal_runtime_enabled = false
-minimal_runtime_cache_ttl_ms = 1000
-
-# Listen on multiple interfaces/IPs - IPv4
-[[server.listeners]]
-ip = "0.0.0.0"
-
-# === Anti-Censorship & Masking ===
 [censorship]
-# Fake-TLS / SNI masking domain used in generated ee-links.
-# Changing tls_domain invalidates previously generated TLS links.
-tls_domain = "petrovich.ru"
-
-mask = true
+tls_domain = "1c.ru"  
+mask = true 
+mask_port = 443
+fake_cert_len = 2048
 tls_emulation = true         # Fetch real cert lengths and emulate TLS records
 tls_front_dir = "tlsfront"   # Cache directory for TLS emulation
 
+
 [access.users]
-# format: "username" = "32_hex_chars_secret"
-hello = "00000000000000000000000000000000"
+user1 = "245f3847ab21c332e79ff92513bee276"
+user2 = "245f3847ab21c332e79ff92513bee277"
+user3 = "245f3847ab21c332e79ff92513bee321"
+user4 = "245f3847ab21c332e79ff92513bee182"
+user5 = "245f3847ab21c332e79ff92513bee115"
+user6 = "245f3847ab21c332e79ff92513bee204"
+user7 = "245f3847ab21c332e79ff92513bee212"
+user8 = "245f3847ab21c332e79ff92513bee134"
+user9 = "245f3847ab21c332e79ff92513bee255"
+user10 = "245f3847ab21c332e79ff92513bee199"
+user11 = "245f3847ab21c332e79ff92513bee193"
+user12 = "245f3245ab21c332e79ff92513bee191"
+
+[[upstreams]]
+type = "direct"
+enabled = true
+weight = 10
