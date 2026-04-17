@@ -1,26 +1,23 @@
 services:
-
   telemt:
-  
     image: ghcr.io/telemt/telemt:latest
     build: .
     container_name: telemt
     restart: unless-stopped
-    
-    environment:
-      - RUST_LOG=info
-    
+    ports:
+      - "443:443"
+      - "127.0.0.1:9090:9090"
+      - "127.0.0.1:9091:9091"
+    # Allow caching 'proxy-secret' in read-only container
     working_dir: /etc/telemt
     volumes:
       - ./config.toml:/etc/telemt/config.toml:ro
     tmpfs:
       - /etc/telemt:rw,mode=1777,size=4m
-    
-    ports:
-      - "443:443"
-      - "127.0.0.1:9090:9090"
-      - "127.0.0.1:9091:9091"
-    
+    environment:
+      - RUST_LOG=info
+    # Uncomment this line if you want to use host network for IPv6, but bridge is default and usually better
+    # network_mode: host
     cap_drop:
       - ALL
     cap_add:
